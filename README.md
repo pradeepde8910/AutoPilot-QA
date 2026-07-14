@@ -42,14 +42,17 @@ This project uses [uv](https://github.com/astral-sh/uv), an extremely fast Pytho
 uv pip install -r requirements.txt
 ```
 
-### 2. Run the API Service
+### 2. Run the Platform (Web Console & API)
 ```bash
 uv run uvicorn api.app:app --reload
 ```
-The API will be available at `http://localhost:8000`. You can view the interactive documentation at `http://localhost:8000/docs`.
+Once started:
+* **Gradio Web Console**: Navigate to `http://localhost:8000/` to use the visual test planner, runner, and configuration dashboard.
+* **REST API Endpoints**: Available under `/api/v1/*`.
+* **API Documentation**: Interactive Swagger docs are at `http://localhost:8000/docs`.
 
-### 3. Run the Desktop Client
-*(Ensure the FastAPI service is running first)*
+### 3. [Optional] Run the Legacy Desktop Client
+*(Note: Requires a local graphical desktop environment)*
 ```bash
 uv run python ui/tkinter_app.py
 ```
@@ -69,7 +72,7 @@ To build the Docker image and start the FastAPI service:
 ```bash
 docker compose up --build -d
 ```
-The FastAPI service will start at `http://localhost:8000` (interactive API documentation at `http://localhost:8000/docs`). Test reports and logs will be persistent in the local `./reports` folder.
+The service will start at `http://localhost:8000` (serving the Gradio Web Console at `/` and the interactive API documentation at `/docs`). Test reports and logs will be persistent in the local `./reports` folder.
 
 ### 3. Build & Run with raw Docker
 Alternatively, you can build and run using docker commands directly:

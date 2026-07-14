@@ -1,8 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
+import gradio as gr
 
 # Import all routers
 from api.routers import orchestrator, requirements, planner, navigation, observation, reflection, verification, evidence, reporting
+from ui.gradio_app import gradio_app
 
 app = FastAPI(
     title="AI Test Orchestration Service",
@@ -29,6 +33,14 @@ app.include_router(reflection.router, prefix="/api/v1")
 app.include_router(verification.router, prefix="/api/v1")
 app.include_router(evidence.router, prefix="/api/v1")
 app.include_router(reporting.router, prefix="/api/v1")
+
+# Mount reports directory to serve static HTML reports and artifacts
+reports_dir = "reports"
+os.makedirs(reports_dir, exist_ok=True)
+app.mount("/reports", StaticFiles(directory=reports_dir), name="reports")
+
+# Mount the Gradio Web UI
+app = gr.mount_gradio_app(app, gradio_app, path="/")
 
 @app.get("/health")
 async def health_check():
