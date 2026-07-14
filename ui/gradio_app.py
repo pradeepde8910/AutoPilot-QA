@@ -29,6 +29,12 @@ from agents.requirement_analysis import RequirementAnalysisAgent
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger Redirection for Gradio
 # ─────────────────────────────────────────────────────────────────────────────
+# Global logs cache and active tracking
+logs_cache = {
+    "Global System Logs": []
+}
+active_test_case = "Global System Logs"
+
 class GradioLogHandler(logging.Handler):
     def __init__(self):
         super().__init__()
@@ -38,19 +44,89 @@ class GradioLogHandler(logging.Handler):
         try:
             log_entry = self.format(record)
             self.records.append(log_entry)
+            
+            global active_test_case, logs_cache
+            # Write to the active test case partition
+            if active_test_case not in logs_cache:
+                logs_cache[active_test_case] = []
+            logs_cache[active_test_case].append(log_entry)
+            
+            # Also append to global system logs
+            if active_test_case != "Global System Logs":
+                if "Global System Logs" not in logs_cache:
+                    logs_cache["Global System Logs"] = []
+                logs_cache["Global System Logs"].append(log_entry)
         except Exception:
             self.handleError(record)
 
-    def get_logs(self) -> str:
-        return "\n".join(self.records)
+    def get_logs(self, key="Global System Logs") -> str:
+        global logs_cache
+        entries = logs_cache.get(key, [])
+        if isinstance(entries, list):
+            return "\n".join(entries)
+        return str(entries)
 
     def clear(self):
         self.records.clear()
+        global logs_cache, active_test_case
+        logs_cache = {
+            "Global System Logs": []
+        }
+        active_test_case = "Global System Logs"
 
 # Setup log hook
 gradio_log_handler = GradioLogHandler()
 gradio_log_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
 logging.getLogger("qa_platform").addHandler(gradio_log_handler)
+
+# Helper to build structured test execution HTML status
+def build_status_html(requirements: list, current_id: str, results: dict) -> str:
+    html = """
+    <div style="background-color: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; max-height: 250px; overflow-y: auto;">
+        <h4 style="color: #94a3b8; margin-top: 0; margin-bottom: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Test Execution Status</h4>
+        <ul style="list-style: none; padding: 0; margin: 0;">
+    """
+    
+    for req in requirements:
+        status = results.get(req.id, "PENDING")
+        if req.id == current_id and status == "PENDING":
+            status = "RUNNING"
+            
+        color = "#64748b" # gray
+        icon = "⚪"
+        badge_text = "Pending"
+        
+        if status == "RUNNING":
+            color = "#f59e0b" # amber
+            icon = "🟡"
+            badge_text = "Running"
+        elif status == "PASS":
+            color = "#22c55e" # green
+            icon = "🟢"
+            badge_text = "Pass"
+        elif status == "FAIL":
+            color = "#ef4444" # red
+            icon = "🔴"
+            badge_text = "Fail"
+            
+        html += f"""
+        <li style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #334155; font-size: 13px;">
+            <div style="display: flex; align-items: center; gap: 8px; color: #f8fafc;">
+                <span style="font-size: 14px;">{icon}</span>
+                <strong>{req.id}</strong>
+                <span style="color: #94a3b8; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{req.description}">{req.description}</span>
+            </div>
+            <span style="background-color: {color}20; color: {color}; border: 1px solid {color}40; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">
+                {badge_text}
+            </span>
+        </li>
+        """
+        
+    html += """
+        </ul>
+    </div>
+    """
+    return html
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global States
@@ -71,11 +147,11 @@ def list_csv_files(output_dir=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab 1: Pipeline Execution logic
 # ─────────────────────────────────────────────────────────────────────────────
-def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_key, default_llm, gemini_default):
-    global is_running, stop_requested, last_report_dir
+def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_key, default_llm, gemini_default, auto_track, selected_tc):
+    global is_running, stop_requested, last_report_dir, active_test_case, logs_cache
     
     if is_running:
-        yield "Pipeline is already running!", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+        yield "Pipeline is already running!", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(), "Pipeline is already running!"
         return
 
     is_running = True
@@ -98,20 +174,19 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
     
     if csv_file is None or not str(csv_file).strip():
         is_running = False
-        yield "Error: No CSV file selected or uploaded.", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+        yield "Error: No CSV file selected or uploaded.", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(), "Error: No CSV file selected or uploaded."
         return
         
     csv_path = csv_file.name if hasattr(csv_file, 'name') else csv_file
         
     if not os.path.exists(csv_path):
         is_running = False
-        yield f"Error: CSV file not found at {csv_path}", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+        yield f"Error: CSV file not found at {csv_path}", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(), f"Error: CSV file not found at {csv_path}"
         return
 
     logger = logging.getLogger("qa_platform")
     logger.info(f"Starting test execution pipeline for requirements in {csv_path}")
-    yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
-
+    
     # Load requirements
     requirements = []
     try:
@@ -133,11 +208,20 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
     except Exception as e:
         is_running = False
         logger.error(f"Failed to load requirements from CSV: {e}")
-        yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+        yield "Error loading CSV", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(), gradio_log_handler.get_logs("Global System Logs")
         return
 
     logger.info(f"Loaded {len(requirements)} requirement(s) from CSV")
-    yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+    
+    # Build initial status HTML
+    results_map = {}
+    active_test_case = "Global System Logs"
+    status_html = build_status_html(requirements, active_test_case, results_map)
+    
+    dropdown_choices = ["Global System Logs"] + [r.id for r in requirements]
+    dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+    
+    yield status_html, pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
 
     planner = PlannerAgent()
     verification = VerificationAgent()
@@ -157,8 +241,15 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
             logger.warning("Pipeline execution stopped by user request.")
             break
             
+        # Switch logging focus to this test case
+        active_test_case = req.id
+        logs_cache[active_test_case] = []
+        
         logger.info(f"====== [{idx+1}/{total}] Processing Test Case: {req.id} ======")
-        yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+        
+        status_html = build_status_html(requirements, active_test_case, results_map)
+        dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+        yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
 
         state = AgentState()
         state.current_requirement = req
@@ -170,7 +261,10 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
                 res = TestResult(test_case_id=req.id, status="FAIL", reasoning="Planner failed to generate steps.")
                 final_results.append(res)
                 results_table_data.append([req.id, res.status, f"{res.confidence_score or 1.0:.0%}", res.reasoning])
-                yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+                results_map[req.id] = "FAIL"
+                status_html = build_status_html(requirements, active_test_case, results_map)
+                dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+                yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
                 continue
 
             browser.launch_browser()
@@ -205,32 +299,47 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
             final_results.append(res)
             
             status_val = res.status.upper()
+            results_map[req.id] = status_val
             conf_val = f"{res.confidence_score:.0%}" if res.confidence_score else "—"
             reason_val = res.reasoning
             if res.suggested_fix:
                 reason_val += f" | Suggested Fix: {res.suggested_fix}"
             results_table_data.append([req.id, status_val, conf_val, reason_val])
             
-            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+            status_html = build_status_html(requirements, active_test_case, results_map)
+            dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+            yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "" , gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
 
         except Exception as e:
             msg = f"Execution Exception: {e}"
             logger.error(msg)
             res = TestResult(test_case_id=req.id, status="FAIL", reasoning=msg)
             final_results.append(res)
+            results_map[req.id] = "FAIL"
             results_table_data.append([req.id, "FAIL", "—", msg])
-            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+            status_html = build_status_html(requirements, active_test_case, results_map)
+            dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+            yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
         finally:
             browser.close_browser()
 
+    # Reset active test case to Global System Logs after completion
+    active_test_case = "Global System Logs"
     logger.info("Pipeline test execution complete. Compiling final reports...")
+    
+    status_html = build_status_html(requirements, active_test_case, results_map)
+    dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+    yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
+
     try:
         reporter.generate_all(final_results)
         logger.info(f"All reports saved successfully to: {last_report_dir}")
     except Exception as e:
         logger.error(f"Failed to generate reports: {e}")
         
-    yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
+    status_html = build_status_html(requirements, active_test_case, results_map)
+    dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+    yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), "", gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
 
     is_running = False
     
@@ -249,13 +358,14 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
         </div>
     </div>
     """
-    yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), report_html
+    dropdown_val = active_test_case if auto_track else (selected_tc or "Global System Logs")
+    yield status_html, pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), report_html, gr.update(choices=dropdown_choices, value=dropdown_val), gradio_log_handler.get_logs(dropdown_val)
 
-def stop_pipeline():
+def stop_pipeline(selected_tc):
     global stop_requested
     stop_requested = True
     logging.getLogger("qa_platform").warning("Stop requested by user — will halt after current test case completes...")
-    return gradio_log_handler.get_logs()
+    return gradio_log_handler.get_logs(selected_tc)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab 2: Requirements Analysis Logic
@@ -523,13 +633,31 @@ with gr.Blocks(theme=gr.themes.Default(primary_hue="indigo", secondary_hue="slat
                 with gr.Column(scale=2):
                     gr.Markdown("### 📋 Live Output & Execution Results")
                     
+                    # Colored list of test cases showing status
+                    live_status_html = gr.HTML(
+                        value="<div style='color: #94a3b8; font-style: italic;'>Run the pipeline to view execution status.</div>"
+                    )
+                    
+                    with gr.Row():
+                        log_viewer_dropdown = gr.Dropdown(
+                            choices=["Global System Logs"],
+                            value="Global System Logs",
+                            label="Select Test Case to View Raw Logs",
+                            scale=3
+                        )
+                        auto_track_logs = gr.Checkbox(
+                            label="Auto-follow current test",
+                            value=True,
+                            scale=1
+                        )
+                    
                     # Log streamer textbox
                     console_output = gr.Textbox(
-                        label="Execution Console Logs", 
+                        label="Test Case Raw Logs", 
                         lines=12, 
                         max_lines=30, 
                         elem_classes=["log-box"],
-                        value="Select a CSV and click Run Pipeline to start."
+                        value="Logs will appear here when a test case is selected or running."
                     )
                     
                     # HTML report placeholder
@@ -555,13 +683,26 @@ with gr.Blocks(theme=gr.themes.Default(primary_hue="indigo", secondary_hue="slat
                     groq_key_input, 
                     gemini_key_input,
                     gr.State(settings.DEFAULT_LLM_MODEL),
-                    gr.State(settings.GEMINI_DEFAULT_MODEL)
+                    gr.State(settings.GEMINI_DEFAULT_MODEL),
+                    auto_track_logs,
+                    log_viewer_dropdown
                 ],
-                outputs=[console_output, results_df, report_status_output]
+                outputs=[live_status_html, results_df, report_status_output, log_viewer_dropdown, console_output]
             )
             
             stop_btn.click(
                 fn=stop_pipeline,
+                inputs=[log_viewer_dropdown],
+                outputs=[console_output]
+            )
+            
+            # Callback to update console log display when user selects a different test case
+            def update_log_display(selected_tc):
+                return gradio_log_handler.get_logs(selected_tc)
+                
+            log_viewer_dropdown.change(
+                fn=update_log_display,
+                inputs=[log_viewer_dropdown],
                 outputs=[console_output]
             )
             
