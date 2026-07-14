@@ -1,0 +1,42 @@
+# Python Bytecode and Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment Variables & Secrets (containing API keys)
+.env
+.env.local
+.env.*
+
+# Project-specific generated test run outputs, logs, and evidence
+logs/
+reports/
+screenshots/
+memory.json
+requirements_v*.csv
+analysis_v*.json
+
+# IDE & Text Editor configurations
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS-specific files
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
