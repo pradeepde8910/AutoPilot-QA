@@ -17,6 +17,7 @@ env/
 .env
 .env.local
 .env.*
+!.env.example
 
 # Project-specific generated test run outputs, logs, and evidence
 logs/

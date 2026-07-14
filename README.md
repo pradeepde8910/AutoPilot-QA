@@ -53,3 +53,30 @@ The API will be available at `http://localhost:8000`. You can view the interacti
 ```bash
 uv run python ui/tkinter_app.py
 ```
+
+## Docker Deployment
+
+This application is ready for deployment as a Docker container, which is ideal for cloud environments, remote servers, or CI/CD pipelines. The container handles installing the python runtime, core dependencies, and the system libraries needed for Playwright's Chromium browser to execute headlessly.
+
+### 1. Configure Secrets
+Create a `.env` file from the template and fill in your API keys:
+```bash
+cp .env.example .env
+```
+
+### 2. Build & Run with Docker Compose
+To build the Docker image and start the FastAPI service:
+```bash
+docker compose up --build -d
+```
+The FastAPI service will start at `http://localhost:8000` (interactive API documentation at `http://localhost:8000/docs`). Test reports and logs will be persistent in the local `./reports` folder.
+
+### 3. Build & Run with raw Docker
+Alternatively, you can build and run using docker commands directly:
+```bash
+# Build the image
+docker build -t ai-test-engineering-platform .
+
+# Run the container
+docker run -d -p 8000:8000 --env-file .env -v "${PWD}/reports:/app/reports" ai-test-engineering-platform
+```
