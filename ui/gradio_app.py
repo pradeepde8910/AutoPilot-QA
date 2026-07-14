@@ -75,7 +75,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
     global is_running, stop_requested, last_report_dir
     
     if is_running:
-        yield "Pipeline is already running!", gr.update(), gr.update()
+        yield "Pipeline is already running!", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
         return
 
     is_running = True
@@ -96,21 +96,21 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
         
     gradio_log_handler.clear()
     
-    if csv_file is None:
+    if csv_file is None or not str(csv_file).strip():
         is_running = False
-        yield "Error: No CSV file selected or uploaded.", gr.update(), gr.update()
+        yield "Error: No CSV file selected or uploaded.", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
         return
         
     csv_path = csv_file.name if hasattr(csv_file, 'name') else csv_file
         
     if not os.path.exists(csv_path):
         is_running = False
-        yield f"Error: CSV file not found at {csv_path}", gr.update(), gr.update()
+        yield f"Error: CSV file not found at {csv_path}", pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
         return
 
     logger = logging.getLogger("qa_platform")
     logger.info(f"Starting test execution pipeline for requirements in {csv_path}")
-    yield gradio_log_handler.get_logs(), gr.update(), gr.update()
+    yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
 
     # Load requirements
     requirements = []
@@ -133,11 +133,11 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
     except Exception as e:
         is_running = False
         logger.error(f"Failed to load requirements from CSV: {e}")
-        yield gradio_log_handler.get_logs(), gr.update(), gr.update()
+        yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
         return
 
     logger.info(f"Loaded {len(requirements)} requirement(s) from CSV")
-    yield gradio_log_handler.get_logs(), gr.update(), gr.update()
+    yield gradio_log_handler.get_logs(), pd.DataFrame(columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
 
     planner = PlannerAgent()
     verification = VerificationAgent()
@@ -158,7 +158,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
             break
             
         logger.info(f"====== [{idx+1}/{total}] Processing Test Case: {req.id} ======")
-        yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), gr.update()
+        yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
 
         state = AgentState()
         state.current_requirement = req
@@ -170,7 +170,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
                 res = TestResult(test_case_id=req.id, status="FAIL", reasoning="Planner failed to generate steps.")
                 final_results.append(res)
                 results_table_data.append([req.id, res.status, f"{res.confidence_score or 1.0:.0%}", res.reasoning])
-                yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), gr.update()
+                yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
                 continue
 
             browser.launch_browser()
@@ -211,7 +211,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
                 reason_val += f" | Suggested Fix: {res.suggested_fix}"
             results_table_data.append([req.id, status_val, conf_val, reason_val])
             
-            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), gr.update()
+            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
 
         except Exception as e:
             msg = f"Execution Exception: {e}"
@@ -219,7 +219,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
             res = TestResult(test_case_id=req.id, status="FAIL", reasoning=msg)
             final_results.append(res)
             results_table_data.append([req.id, "FAIL", "—", msg])
-            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), gr.update()
+            yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
         finally:
             browser.close_browser()
 
@@ -230,7 +230,7 @@ def run_pipeline(csv_file, headless, output_dir, max_retries, groq_key, gemini_k
     except Exception as e:
         logger.error(f"Failed to generate reports: {e}")
         
-    yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), gr.update()
+    yield gradio_log_handler.get_logs(), pd.DataFrame(results_table_data, columns=["Test Case ID", "Status", "Confidence", "Reasoning"]), ""
 
     is_running = False
     
@@ -323,7 +323,7 @@ def analyze_requirements(raw_text, groq_key, gemini_key, default_llm, gemini_def
         ])
         
     df = pd.DataFrame(table_data, columns=["Module", "Feature", "Test Case", "Priority", "Confidence"])
-    return clarifications_html, enable_save, df, gr.update()
+    return clarifications_html, enable_save, df, ""
 
 def approve_and_save(output_dir):
     global current_analysis_json
@@ -348,8 +348,8 @@ def approve_and_save(output_dir):
         if nums:
             version = max(nums) + 1
             
-    csv_filename = base_dir / f"requirements_v{version}.csv"
-    json_filename = base_dir / f"analysis_v{version}.json"
+    csv_filename = (base_dir / f"requirements_v{version}.csv").resolve()
+    json_filename = (base_dir / f"analysis_v{version}.json").resolve()
     
     # Save Raw Analysis JSON
     with open(json_filename, "w", encoding="utf-8") as f:
